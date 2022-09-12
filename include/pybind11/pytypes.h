@@ -472,78 +472,10 @@ struct error_fetch_and_normalize {
     error_fetch_and_normalize(const error_fetch_and_normalize &) = delete;
     error_fetch_and_normalize(error_fetch_and_normalize &&) = delete;
 
-    std::string format_value_and_trace() const {
-        std::string result;
-        std::string message_error_string;
-        if (m_value) {
-            auto value_str = reinterpret_steal<object>(PyObject_Str(m_value.ptr()));
-            if (!value_str) {
-                message_error_string = detail::error_string();
-                result = "<MESSAGE UNAVAILABLE DUE TO ANOTHER EXCEPTION>";
-            } else {
-                result = value_str.cast<std::string>();
-            }
-        } else {
-            result = "<MESSAGE UNAVAILABLE>";
-        }
-        if (result.empty()) {
-            result = "<EMPTY MESSAGE>";
-        }
+    std::string format_value_and_trace() const;
 
-        bool have_trace = false;
-        if (m_trace) {
-#if !defined(PYPY_VERSION)
-            auto *tb = reinterpret_cast<PyTracebackObject *>(m_trace.ptr());
-
-            // Get the deepest trace possible.
-            while (tb->tb_next) {
-                tb = tb->tb_next;
-            }
-
-            PyFrameObject *frame = tb->tb_frame;
-            Py_XINCREF(frame);
-            result += "\n\nAt:\n";
-            while (frame) {
-#    if PY_VERSION_HEX >= 0x030900B1
-                PyCodeObject *f_code = PyFrame_GetCode(frame);
-#    else
-                PyCodeObject *f_code = frame->f_code;
-                Py_INCREF(f_code);
-#    endif
-                int lineno = PyFrame_GetLineNumber(frame);
-                result += "  ";
-                result += handle(f_code->co_filename).cast<std::string>();
-                result += '(';
-                result += std::to_string(lineno);
-                result += "): ";
-                result += handle(f_code->co_name).cast<std::string>();
-                result += '\n';
-                Py_DECREF(f_code);
-#    if PY_VERSION_HEX >= 0x030900B1
-                auto *b_frame = PyFrame_GetBack(frame);
-#    else
-                auto *b_frame = frame->f_back;
-                Py_XINCREF(b_frame);
-#    endif
-                Py_DECREF(frame);
-                frame = b_frame;
-            }
-
-            have_trace = true;
-#endif //! defined(PYPY_VERSION)
-        }
-
-        if (!message_error_string.empty()) {
-            if (!have_trace) {
-                result += '\n';
-            }
-            result += "\nMESSAGE UNAVAILABLE DUE TO EXCEPTION: " + message_error_string;
-        }
-
-        return result;
-    }
-
-    std::string const &error_string() const {
+    std::string const &error_string() const 
+    {
         if (!m_lazy_error_string_completed) {
             m_lazy_error_string += ": " + format_value_and_trace();
             m_lazy_error_string_completed = true;
@@ -1479,6 +1411,51 @@ private:
         return str_value;
     }
 };
+
+
+class wstr : public object {
+public:
+    PYBIND11_OBJECT_CVT(wstr, object, PYBIND11_STR_CHECK_FUN, raw_str)
+
+    wstr(const wchar_t *c, size_t n) : object(PyUnicode_FromWideChar(c, (ssize_t) n), stolen_t{}) {
+        if (!m_ptr)
+            pybind11_fail("Could not allocate string object!");
+    }
+
+    // 'explicit' is omitted from the following constructors to allow implicit
+    // conversion to py::str from C++ string-like objects
+    wstr(const wchar_t *c = L"") : object(PyUnicode_FromWideChar(c, -1), stolen_t{}) {
+        if (!m_ptr)
+            pybind11_fail("Could not allocate string object!");
+    }
+
+    wstr(const std::wstring_view &s) : wstr(s.data(), s.size()) {}
+
+    // Not sure how to implement
+    // explicit str(const bytes &b);
+
+    explicit wstr(handle h) : object(raw_str(h.ptr()), stolen_t{}) {}
+
+    operator std::wstring() const {
+        if (!PyUnicode_Check(m_ptr))
+            pybind11_fail("Unable to extract string contents!");
+        ssize_t length;
+        wchar_t *buffer = PyUnicode_AsWideCharString(ptr(), &length);
+        return std::wstring(buffer, (size_t) length);
+    }
+
+    template <typename... Args>
+    wstr format(Args &&...args) const {
+        return attr("format")(std::forward<Args>(args)...);
+    }
+
+private:
+    /// Return string representation -- always returns a new reference, even if already a str
+    static PyObject *raw_str(PyObject *op) {
+        PyObject *str_value = PyObject_Str(op);
+        return str_value;
+    }
+};
 /// @} pytypes
 
 inline namespace literals {
@@ -2280,6 +2257,105 @@ inline iterator iter(handle obj) {
 /// @} python_builtins
 
 PYBIND11_NAMESPACE_BEGIN(detail)
+
+inline std::string error_fetch_and_normalize::format_value_and_trace() const 
+{
+    /// A replacement for format_value_and_trace which handles
+    /// the auxillary context and cause exceptions.
+    PyObject *traceback = PyImport_ImportModule("traceback");
+    auto format_exception = traceback
+      ? PyObject_GetAttrString(traceback, "format_exception") 
+      : nullptr;
+
+    if (format_exception) 
+    {
+      auto errs = PyObject_CallFunctionObjArgs(
+          format_exception, m_type.ptr(), m_value.ptr(), m_trace.ptr());
+      auto errors = reinterpret_steal<list>(errs);
+
+      // Python's error output is backwards, so we show the original error first
+      // at that's likely the most useful thing to understand the problem
+      auto errorString = (std::string) str(errors[errors.size() - 1]);
+
+      for (auto i = 0u; i < errors.size(); ++i)
+          errorString += (std::string) str(errors[i]);
+
+      return errorString;
+    } 
+    else // Couldn't import traceback for some reason, do things manually
+    {
+		PyErr_Clear();
+        std::string result;
+        std::string message_error_string;
+        if (m_value) {
+            auto value_str = reinterpret_steal<object>(PyObject_Str(m_value.ptr()));
+            if (!value_str) {
+                message_error_string = detail::error_string();
+                result = "<MESSAGE UNAVAILABLE DUE TO ANOTHER EXCEPTION>";
+            } else {
+                result = value_str.cast<std::string>();
+            }
+        } else {
+            result = "<MESSAGE UNAVAILABLE>";
+        }
+        if (result.empty()) {
+            result = "<EMPTY MESSAGE>";
+        }
+
+        bool have_trace = false;
+        if (m_trace) {
+#if !defined(PYPY_VERSION)
+            auto *tb = reinterpret_cast<PyTracebackObject *>(m_trace.ptr());
+
+            // Get the deepest trace possible.
+            while (tb->tb_next) {
+                tb = tb->tb_next;
+            }
+
+            PyFrameObject *frame = tb->tb_frame;
+            Py_XINCREF(frame);
+            result += "\n\nAt:\n";
+            while (frame) {
+#    if PY_VERSION_HEX >= 0x030900B1
+                PyCodeObject *f_code = PyFrame_GetCode(frame);
+#    else
+                PyCodeObject *f_code = frame->f_code;
+                Py_INCREF(f_code);
+#    endif
+                int lineno = PyFrame_GetLineNumber(frame);
+                result += "  ";
+                result += handle(f_code->co_filename).cast<std::string>();
+                result += '(';
+                result += std::to_string(lineno);
+                result += "): ";
+                result += handle(f_code->co_name).cast<std::string>();
+                result += '\n';
+                Py_DECREF(f_code);
+#    if PY_VERSION_HEX >= 0x030900B1
+                auto *b_frame = PyFrame_GetBack(frame);
+#    else
+                auto *b_frame = frame->f_back;
+                Py_XINCREF(b_frame);
+#    endif
+                Py_DECREF(frame);
+                frame = b_frame;
+            }
+
+            have_trace = true;
+#endif //! defined(PYPY_VERSION)
+        }
+
+        if (!message_error_string.empty()) {
+            if (!have_trace) {
+                result += '\n';
+            }
+            result += "\nMESSAGE UNAVAILABLE DUE TO EXCEPTION: " + message_error_string;
+        }
+
+        return result;
+    }
+}
+
 template <typename D>
 iterator object_api<D>::begin() const {
     return iter(derived());

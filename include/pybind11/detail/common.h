@@ -148,7 +148,7 @@
 
 /* Don't let Python.h #define (v)snprintf as macro because they are implemented
    properly in Visual Studio since 2015. */
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) & !defined(HAVE_SNPRINTF)
 #    define HAVE_SNPRINTF 1
 #endif
 
