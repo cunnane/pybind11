@@ -281,6 +281,12 @@ jobs:
             std: 20
           - clang: 10
             std: 17
+          - clang: 11
+            std: 20
+          - clang: 12
+            std: 20
+          - clang: 13
+            std: 20
           - clang: 14
             std: 20
 
@@ -437,14 +443,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        gcc:
-          - 7
-          - latest
-        std:
-          - 11
         include:
-          - gcc: 10
-            std: 20
+          - { gcc: 7, std: 11 }
+          - { gcc: 7, std: 17 }
+          - { gcc: 8, std: 14 }
+          - { gcc: 8, std: 17 }
+          - { gcc: 10, std: 17 }
+          - { gcc: 11, std: 20 }
+          - { gcc: 12, std: 20 }
 
     name: "🐍 3 • GCC ${{ matrix.gcc }} • C++${{ matrix.std }}• x64"
     container: "gcc:${{ matrix.gcc }}"
@@ -748,7 +754,7 @@ jobs:
       uses: jwlawson/actions-setup-cmake@v1.12
 
     - name: Prepare MSVC
-      uses: ilammy/msvc-dev-cmd@v1.10.0
+      uses: ilammy/msvc-dev-cmd@v1.11.0
       with:
         arch: x86
 
@@ -801,7 +807,7 @@ jobs:
       uses: jwlawson/actions-setup-cmake@v1.12
 
     - name: Prepare MSVC
-      uses: ilammy/msvc-dev-cmd@v1.10.0
+      uses: ilammy/msvc-dev-cmd@v1.11.0
       with:
         arch: x86
 
@@ -905,7 +911,7 @@ jobs:
     - name: Configure C++11
       # LTO leads to many undefined reference like
       # `pybind11::detail::function_call::function_call(pybind11::detail::function_call&&)
-      run: cmake -G "MinGW Makefiles" -DCMAKE_CXX_STANDARD=11 -DDOWNLOAD_CATCH=ON -S . -B build
+      run: cmake -G "MinGW Makefiles" -DCMAKE_CXX_STANDARD=11 -DCMAKE_VERBOSE_MAKEFILE=ON -DPYBIND11_WERROR=ON -DDOWNLOAD_CATCH=ON -S . -B build
 
     - name: Build C++11
       run: cmake --build build -j 2
@@ -923,7 +929,7 @@ jobs:
       run: git clean -fdx
 
     - name: Configure C++14
-      run: cmake -G "MinGW Makefiles" -DCMAKE_CXX_STANDARD=14 -DDOWNLOAD_CATCH=ON -S . -B build2
+      run: cmake -G "MinGW Makefiles" -DCMAKE_CXX_STANDARD=14 -DCMAKE_VERBOSE_MAKEFILE=ON -DPYBIND11_WERROR=ON -DDOWNLOAD_CATCH=ON -S . -B build2
 
     - name: Build C++14
       run: cmake --build build2 -j 2
@@ -941,7 +947,7 @@ jobs:
       run: git clean -fdx
 
     - name: Configure C++17
-      run: cmake -G "MinGW Makefiles" -DCMAKE_CXX_STANDARD=17 -DDOWNLOAD_CATCH=ON -S . -B build3
+      run: cmake -G "MinGW Makefiles" -DCMAKE_CXX_STANDARD=17 -DCMAKE_VERBOSE_MAKEFILE=ON -DPYBIND11_WERROR=ON -DDOWNLOAD_CATCH=ON -S . -B build3
 
     - name: Build C++17
       run: cmake --build build3 -j 2
