@@ -2266,11 +2266,12 @@ inline std::string error_fetch_and_normalize::format_value_and_trace() const
     auto format_exception = traceback
       ? PyObject_GetAttrString(traceback, "format_exception") 
       : nullptr;
+    PyErr_Clear(); // we don't care why PyObject_GetAttrString failed
 
     if (format_exception) 
     {
       auto errs = PyObject_CallFunctionObjArgs(
-          format_exception, m_type.ptr(), m_value.ptr(), m_trace.ptr());
+          format_exception, m_type.ptr(), m_value.ptr(), m_trace.ptr(), NULL);
       auto errors = reinterpret_steal<list>(errs);
 
       // Python's error output is backwards, so we show the original error first
@@ -2284,7 +2285,7 @@ inline std::string error_fetch_and_normalize::format_value_and_trace() const
     } 
     else // Couldn't import traceback for some reason, do things manually
     {
-		PyErr_Clear();
+		    
         std::string result;
         std::string message_error_string;
         if (m_value) {
