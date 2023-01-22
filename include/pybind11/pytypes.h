@@ -2262,30 +2262,35 @@ inline std::string error_fetch_and_normalize::format_value_and_trace() const
 {
     /// A replacement for format_value_and_trace which handles
     /// the auxillary context and cause exceptions.
-    PyObject *traceback = PyImport_ImportModule("traceback");
-    auto format_exception = traceback
-      ? PyObject_GetAttrString(traceback, "format_exception") 
-      : nullptr;
-    PyErr_Clear(); // we don't care why PyObject_GetAttrString failed
-
-    if (format_exception) 
+    PyObject* traceback = PyImport_ImportModule("traceback");
+    if (traceback) 
     {
-      auto errs = PyObject_CallFunctionObjArgs(
+      auto format_exception = PyObject_GetAttrString(traceback, "format_exception");
+      Py_XDECREF(traceback);
+      if (format_exception) 
+      {
+        auto formatted_exception_ptr = PyObject_CallFunctionObjArgs(
           format_exception, m_type.ptr(), m_value.ptr(), m_trace.ptr(), NULL);
-      auto errors = reinterpret_steal<list>(errs);
+        Py_XDECREF(format_exception);
+        if (formatted_exception_ptr) 
+        {
+          auto errors = reinterpret_steal<list>(formatted_exception_ptr);
 
-      // Python's error output is backwards, so we show the original error first
-      // at that's likely the most useful thing to understand the problem
-      auto errorString = (std::string) str(errors[errors.size() - 1]);
+          // Python's error output is backwards, so we show the original error first
+          // at that's likely the most useful thing to understand the problem
+          auto errorString = (std::string)str(errors[errors.size() - 1]);
 
-      for (auto i = 0u; i < errors.size(); ++i)
-          errorString += (std::string) str(errors[i]);
+          for (auto i = 0u; i < errors.size(); ++i)
+            errorString += (std::string)str(errors[i]);
 
-      return errorString;
-    } 
-    else // Couldn't import traceback for some reason, do things manually
+          return errorString;
+        }
+      }
+    }
+
+    // Couldn't import traceback for some reason, do things manually
+    PyErr_Clear(); // we don't care why any of the above Py calls failed
     {
-		    
         std::string result;
         std::string message_error_string;
         if (m_value) {
